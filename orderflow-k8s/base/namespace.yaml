@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: orderflow
+  labels:
+    app.kubernetes.io/name: orderflow
+    app.kubernetes.io/managed-by: kubectl8    
+    # ── Istio sidecar injection ──────────────────────────────────────────────
+    # This single label tells Istio's mutating webhook to automatically inject
+    # an Envoy proxy sidecar into every new pod created in this namespace.
+    # No changes to individual Deployment manifests are needed.
+    istio-injection: enabled

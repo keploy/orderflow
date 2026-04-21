@@ -1,0 +1,77 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: consumer
+  namespace: orderflow
+  labels:
+    app: consumer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: consumer
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: consumer
+    spec:
+      # ── Mac ARM64 (Apple Silicon) ──────────────────────────────────────────
+      # The consumer image is built with GOARCH=arm64 CGO_ENABLED=0.
+      # nodeSelector ensures it only lands on the arm64 Minikube node.
+      nodeSelector:
+        kubernetes.io/arch: arm64
+      initContainers:
+        # Consumer only needs Kafka — enforcing the "no S3/PG" contract.
+        # curlimages/curl is multi-arch and has a reliable nc on ARM.
+        - name: wait-for-kafka
+          image: curlimages/curl:8.5.0
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for Kafka (kafka:29092)..."
+              until nc -z kafka 29092; do sleep 2; done
+              echo "✓ Kafka ready — starting consumer"
+              echo "NOTE: Consumer has NO access to S3 or Postgres by design"
+      containers:
+        - name: consumer
+          image: orderflow-consumer:latest
+          # Never — image is loaded directly into Minikube via `minikube image load`.
+          imagePullPolicy: Never
+          env:
+            - name: KAFKA_BROKERS
+              valueFrom:
+                configMapKeyRef:
+                  name: orderflow-config
+                  key: KAFKA_BROKERS
+            - name: KAFKA_GROUP_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: orderflow-config
+                  key: KAFKA_GROUP_ID
+            - name: KAFKA_TOPIC
+              valueFrom:
+                configMapKeyRef:
+                  name: orderflow-config
+                  key: KAFKA_TOPIC
+          # No S3 / Postgres env vars are mounted — enforcing isolation at the manifest level.
+          # kill -0 1 checks PID 1 is alive without needing ps or a shell binary.
+          # This works correctly on debian:bookworm-slim (the consumer runtime image).
+          # livenessProbe:
+          #   exec:
+          #     command: ["kill", "-0", "1"]
+          #   initialDelaySeconds: 15
+          #   periodSeconds: 20
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 128Mi

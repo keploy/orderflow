@@ -1,0 +1,92 @@
+---
+# ═══════════════════════════════════════════════════════════════════════════════
+# RETRY POLICY + TIMEOUTS — VirtualServices
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# VirtualService controls how traffic is routed TO a service.
+# DestinationRule controls how traffic behaves AFTER reaching the service.
+#
+# Together they form:
+#   VirtualService (retry on 503/504) → DestinationRule (circuit breaker)
+#
+# This VirtualService adds:
+#  1. Automatic retries when the producer returns 503 (overloaded) or 504
+#     (timeout). The Envoy proxy on the CALLER side retries transparently
+#     before the error ever reaches the client.
+#  2. A 10-second overall timeout per request to the producer API.
+#  3. Per-attempt timeout of 3s so a slow replica doesn't hold up a retry.
+
+---
+# Retry + timeout policy for the producer API
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: producer-vs
+  namespace: orderflow
+spec:
+  hosts:
+    - producer
+  http:
+    - match:
+        # Only retry GET requests — safe to retry (idempotent).
+        # POST (create order) is NOT retried automatically: retrying a
+        # POST could create duplicate orders. The client must handle those.
+        - method:
+            exact: GET
+      retries:
+        attempts: 3
+        # Retry when the producer's Envoy sidecar reports these conditions:
+        #   5xx          → producer returned a server error
+        #   gateway-error → 502/503/504 from load balancer
+        #   reset         → TCP connection was reset before response
+        #   retriable-4xx → 409 Conflict (safe subset of 4xx to retry)
+        retryOn: "5xx,gateway-error,reset,retriable-4xx"
+        perTryTimeout: 3s
+      timeout: 10s
+      route:
+        - destination:
+            host: producer
+            port:
+              number: 8080
+    - match:
+        # POST requests: no retry, but still enforce a timeout.
+        # Without a timeout, a slow Postgres write could hold the HTTP
+        # connection open for minutes, consuming a goroutine per request.
+        - method:
+            exact: POST
+      timeout: 15s
+      route:
+        - destination:
+            host: producer
+            port:
+              number: 8080
+    # All other methods (OPTIONS, HEAD, etc.)
+    - route:
+        - destination:
+            host: producer
+            port:
+              number: 8080
+      timeout: 10s
+---
+# Timeout policy for LocalStack S3 calls from the producer.
+# Receipt uploads are non-critical — if S3 is slow, fail fast (5s)
+# rather than blocking the order creation HTTP response.
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: localstack-vs
+  namespace: orderflow
+spec:
+  hosts:
+    - localstack
+  http:
+    - retries:
+        attempts: 2
+        retryOn: "5xx,reset"
+        perTryTimeout: 3s
+      timeout: 5s
+      route:
+        - destination:
+            host: localstack
+            port:
+              number: 4566

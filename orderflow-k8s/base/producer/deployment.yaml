@@ -1,0 +1,121 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: producer
+  namespace: orderflow
+  labels:
+    app: producer
+spec:
+  selector:
+    app: producer
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: producer
+  namespace: orderflow
+  labels:
+    app: producer
+  annotations:
+    deployment.kubernetes.io/revision: "1"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: producer
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      annotations:
+        proxy.istio.io/config: '{ "holdApplicationUntilProxyStarts": true }'
+        # Exclude inbound traffic to the Keploy agent port
+        # Exclude outbound traffic to the k8s-proxy ports
+        traffic.sidecar.istio.io/excludeInboundPorts: "45995"
+        # sidecar.istio.io/interceptionMode: TPROXY
+
+      labels:
+        app: producer
+    spec:
+      # ── Mac ARM64 (Apple Silicon) ──────────────────────────────────────────
+      # The producer image is built with GOARCH=arm64 CGO_ENABLED=0.
+      # nodeSelector ensures it only lands on the arm64 Minikube node.
+      nodeSelector:
+        kubernetes.io/arch: arm64
+      initContainers:
+        # curlimages/curl is a proper multi-arch image with a reliable nc binary.
+        # Avoids the busybox nc -z flag inconsistency on ARM inside Minikube.
+        - name: wait-for-deps
+          image: curlimages/curl:8.5.0
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for Kafka (kafka:29092)..."
+              until nc -z kafka 29092; do sleep 2; done
+              echo "✓ Kafka ready"
+
+              echo "Waiting for Postgres Shard 1 (postgres-shard1:5432)..."
+              until nc -z postgres-shard1 5432; do sleep 2; done
+              echo "✓ Postgres Shard 1 ready"
+
+              echo "Waiting for Postgres Shard 2 (postgres-shard2:5432)..."
+              until nc -z postgres-shard2 5432; do sleep 2; done
+              echo "✓ Postgres Shard 2 ready"
+
+              echo "Waiting for LocalStack (localstack:4566)..."
+              until nc -z localstack 4566; do sleep 2; done
+              echo "✓ LocalStack ready"
+
+              echo "All dependencies ready!"
+      containers:
+        - name: producer
+          image: orderflow-producer:latest
+          # Never — image is loaded directly into Minikube via `minikube image load`,
+          # so there is no registry to pull from. Always would cause ImagePullBackOff.
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: orderflow-config
+          env:
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: orderflow-secrets
+                  key: AWS_ACCESS_KEY_ID
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: orderflow-secrets
+                  key: AWS_SECRET_ACCESS_KEY
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 5
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
