@@ -1,0 +1,181 @@
+---
+# Allow producer to reach Kafka, both Postgres shards, and LocalStack
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: producer-egress
+  namespace: orderflow
+spec:
+  podSelector:
+    matchLabels:
+      app: producer
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - ports:
+        - port: 8080
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: keploy
+      ports:
+        - port: 8080
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: kafka
+      ports:
+        - port: 29092
+    - to:
+        - podSelector:
+            matchLabels:
+              app: postgres-shard1
+      ports:
+        - port: 5432
+    - to:
+        - podSelector:
+            matchLabels:
+              app: postgres-shard2
+      ports:
+        - port: 5432
+    - to:
+        - podSelector:
+            matchLabels:
+              app: localstack
+      ports:
+        - port: 4566
+    # Allow DNS resolution
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    - to:
+      - namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: istio-system
+      ports:
+      - protocol: TCP
+        port: 15012
+      - protocol: TCP
+        port: 15010
+---
+# Consumer may ONLY reach Kafka — cannot reach Postgres or LocalStack
+# This enforces the architectural contract at the network layer
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: consumer-egress
+  namespace: orderflow
+spec:
+  podSelector:
+    matchLabels:
+      app: consumer
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: kafka
+      ports:
+        - port: 29092
+    # Allow DNS resolution
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # NOTE: No rule for postgres-shard1, postgres-shard2, or localstack
+    #       Consumer traffic to those services will be DROPPED by the kernel
+---
+# Kafka allows ingress from producer and consumer only
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: kafka-ingress
+  namespace: orderflow
+spec:
+  podSelector:
+    matchLabels:
+      app: kafka
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: producer
+        - podSelector:
+            matchLabels:
+              app: consumer
+      ports:
+        - port: 29092
+    - from:
+        - podSelector:
+            matchLabels:
+              app: zookeeper
+      ports:
+        - port: 29092
+        - port: 9092
+---
+# Postgres shards allow ingress from producer ONLY
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres-ingress
+  namespace: orderflow
+spec:
+  podSelector:
+    matchLabels:
+      app: postgres-shard1
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: producer
+      ports:
+        - port: 5432
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres-shard2-ingress
+  namespace: orderflow
+spec:
+  podSelector:
+    matchLabels:
+      app: postgres-shard2
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: producer
+      ports:
+        - port: 5432
+---
+# LocalStack allows ingress from producer ONLY
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: localstack-ingress
+  namespace: orderflow
+spec:
+  podSelector:
+    matchLabels:
+      app: localstack
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: producer
+      ports:
+        - port: 4566

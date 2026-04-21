@@ -1,0 +1,859 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OrderFlow — Real-time Order Pipeline</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0a0f;
+    --surface: #111118;
+    --surface2: #1a1a24;
+    --border: #2a2a38;
+    --accent: #00ff88;
+    --accent2: #0088ff;
+    --accent3: #ff6b35;
+    --text: #e8e8f0;
+    --muted: #6b6b80;
+    --shard1: #00ff88;
+    --shard2: #0088ff;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Syne', sans-serif;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+  /* Animated grid background */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(0,255,136,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,255,136,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  header {
+    padding: 24px 40px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: relative;
+    z-index: 10;
+    background: rgba(10,10,15,0.8);
+    backdrop-filter: blur(20px);
+    position: sticky;
+    top: 0;
+  }
+  .logo {
+    font-size: 1.4rem;
+    font-weight: 800;
+    letter-spacing: -0.5px;
+  }
+  .logo span { color: var(--accent); }
+  .status-bar {
+    display: flex;
+    gap: 20px;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.75rem;
+  }
+  .status-pill {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 12px;
+    border-radius: 20px;
+    border: 1px solid var(--border);
+    color: var(--muted);
+  }
+  .status-pill .dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--muted);
+  }
+  .status-pill.online .dot {
+    background: var(--accent);
+    box-shadow: 0 0 6px var(--accent);
+    animation: pulse 2s infinite;
+  }
+  .status-pill.online { color: var(--accent); border-color: rgba(0,255,136,0.2); }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+
+  main {
+    position: relative;
+    z-index: 1;
+    padding: 40px;
+    max-width: 1400px;
+    margin: 0 auto;
+  }
+
+  .arch-section {
+    margin-bottom: 40px;
+  }
+  .section-label {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.65rem;
+    color: var(--muted);
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    margin-bottom: 16px;
+  }
+
+  /* Architecture diagram */
+  .arch-diagram {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 32px;
+    overflow-x: auto;
+  }
+  .flow {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    min-width: 900px;
+  }
+  .node {
+    flex: 1;
+    background: var(--surface2);
+    border-radius: 12px;
+    padding: 20px 16px;
+    text-align: center;
+    position: relative;
+    border: 1px solid var(--border);
+    transition: border-color 0.3s;
+  }
+  .node:hover { border-color: var(--accent); }
+  .node-icon { font-size: 1.8rem; margin-bottom: 8px; }
+  .node-title {
+    font-weight: 700;
+    font-size: 0.85rem;
+    margin-bottom: 4px;
+  }
+  .node-sub {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.65rem;
+    color: var(--muted);
+    line-height: 1.4;
+  }
+  .node.accent { border-color: rgba(0,255,136,0.4); }
+  .node.kafka { border-color: rgba(0,136,255,0.4); }
+  .node.consumer { border-color: rgba(255,107,53,0.4); }
+  .node-badge {
+    position: absolute;
+    top: -8px;
+    right: 10px;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.55rem;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-weight: 500;
+  }
+  .badge-write { background: rgba(0,255,136,0.15); color: var(--accent); border: 1px solid rgba(0,255,136,0.3); }
+  .badge-pub { background: rgba(0,136,255,0.15); color: var(--accent2); border: 1px solid rgba(0,136,255,0.3); }
+  .badge-read { background: rgba(255,107,53,0.15); color: var(--accent3); border: 1px solid rgba(255,107,53,0.3); }
+  .badge-no { background: rgba(100,100,100,0.15); color: var(--muted); border: 1px solid var(--border); }
+
+  .arrow {
+    width: 60px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+  }
+  .arrow-line {
+    width: 100%;
+    height: 2px;
+    position: relative;
+  }
+  .arrow-line::after {
+    content: '';
+    position: absolute;
+    right: 0;
+    top: -4px;
+    border: 5px solid transparent;
+    border-left: 8px solid;
+  }
+  .arrow-label {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.6rem;
+    text-align: center;
+    white-space: nowrap;
+  }
+  .arrow.green .arrow-line { background: var(--accent); }
+  .arrow.green .arrow-line::after { border-left-color: var(--accent); }
+  .arrow.green .arrow-label { color: var(--accent); }
+  .arrow.blue .arrow-line { background: var(--accent2); }
+  .arrow.blue .arrow-line::after { border-left-color: var(--accent2); }
+  .arrow.blue .arrow-label { color: var(--accent2); }
+  .arrow.orange .arrow-line { background: var(--accent3); }
+  .arrow.orange .arrow-line::after { border-left-color: var(--accent3); }
+  .arrow.orange .arrow-label { color: var(--accent3); }
+
+  .sub-nodes {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex: 1;
+  }
+  .sub-node {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px;
+    text-align: center;
+  }
+  .sub-node-title { font-size: 0.75rem; font-weight: 600; }
+  .sub-node-sub { font-family: 'DM Mono', monospace; font-size: 0.6rem; color: var(--muted); margin-top: 2px; }
+  .sub-node.s1 { border-color: rgba(0,255,136,0.3); }
+  .sub-node.s2 { border-color: rgba(0,136,255,0.3); }
+
+  /* Main grid */
+  .grid-2 {
+    display: grid;
+    grid-template-columns: 420px 1fr;
+    gap: 24px;
+    margin-bottom: 24px;
+  }
+
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 28px;
+  }
+  .panel-title {
+    font-size: 1rem;
+    font-weight: 700;
+    margin-bottom: 6px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .panel-desc {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.7rem;
+    color: var(--muted);
+    margin-bottom: 24px;
+  }
+
+  /* Form */
+  .form-group { margin-bottom: 16px; }
+  label {
+    display: block;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.7rem;
+    color: var(--muted);
+    letter-spacing: 1px;
+    margin-bottom: 6px;
+    text-transform: uppercase;
+  }
+  input, select {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 14px;
+    color: var(--text);
+    font-family: 'DM Mono', monospace;
+    font-size: 0.85rem;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  input:focus, select:focus { border-color: var(--accent); }
+  select option { background: var(--surface2); }
+
+  .shard-indicator {
+    margin-top: 8px;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.7rem;
+    padding: 6px 10px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    opacity: 0;
+    transition: opacity 0.3s;
+  }
+  .shard-indicator.visible { opacity: 1; }
+  .shard-indicator.s1 { background: rgba(0,255,136,0.1); color: var(--shard1); }
+  .shard-indicator.s2 { background: rgba(0,136,255,0.1); color: var(--shard2); }
+
+  .submit-btn {
+    width: 100%;
+    padding: 14px;
+    background: var(--accent);
+    color: #000;
+    border: none;
+    border-radius: 8px;
+    font-family: 'Syne', sans-serif;
+    font-size: 0.95rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
+    margin-top: 8px;
+    letter-spacing: 0.5px;
+  }
+  .submit-btn:hover { background: #00e87a; transform: translateY(-1px); }
+  .submit-btn:active { transform: translateY(0); }
+  .submit-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+  /* Response panel */
+  .response-box {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.72rem;
+    color: var(--accent);
+    min-height: 120px;
+    max-height: 200px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    line-height: 1.6;
+    margin-top: 16px;
+    display: none;
+  }
+  .response-box.visible { display: block; }
+  .response-box.error { color: #ff4444; }
+
+  /* Orders table */
+  .orders-table-wrap {
+    overflow-x: auto;
+    max-height: 400px;
+    overflow-y: auto;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.72rem;
+  }
+  th {
+    padding: 10px 14px;
+    text-align: left;
+    color: var(--muted);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    font-size: 0.62rem;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg);
+    position: sticky;
+    top: 0;
+  }
+  td {
+    padding: 12px 14px;
+    border-bottom: 1px solid rgba(42,42,56,0.5);
+    vertical-align: middle;
+  }
+  tr:hover td { background: var(--surface2); }
+  .tag {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.65rem;
+    font-weight: 500;
+  }
+  .tag-s1 { background: rgba(0,255,136,0.12); color: var(--shard1); }
+  .tag-s2 { background: rgba(0,136,255,0.12); color: var(--shard2); }
+  .tag-pending { background: rgba(255,180,0,0.12); color: #ffb400; }
+  .tag-created { background: rgba(0,255,136,0.12); color: var(--accent); }
+  .empty-state {
+    text-align: center;
+    padding: 40px;
+    color: var(--muted);
+    font-family: 'DM Mono', monospace;
+    font-size: 0.8rem;
+  }
+
+  /* Stats row */
+  .stats-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+  }
+  .stat-value {
+    font-size: 1.8rem;
+    font-weight: 800;
+    margin-bottom: 4px;
+  }
+  .stat-label {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.65rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+  .stat-card:nth-child(1) .stat-value { color: var(--text); }
+  .stat-card:nth-child(2) .stat-value { color: var(--accent); }
+  .stat-card:nth-child(3) .stat-value { color: var(--accent2); }
+  .stat-card:nth-child(4) .stat-value { color: var(--accent3); }
+
+  /* Activity feed */
+  .activity-feed {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    height: 220px;
+    overflow-y: auto;
+    padding: 12px;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.68rem;
+  }
+  .feed-item {
+    padding: 6px 8px;
+    border-radius: 4px;
+    margin-bottom: 4px;
+    display: flex;
+    gap: 10px;
+    animation: slideIn 0.3s ease;
+  }
+  @keyframes slideIn {
+    from { opacity: 0; transform: translateX(-10px); }
+    to { opacity: 1; transform: translateX(0); }
+  }
+  .feed-time { color: var(--muted); flex-shrink: 0; }
+  .feed-kafka { color: var(--accent2); }
+  .feed-s3 { color: var(--accent3); }
+  .feed-pg { color: var(--accent); }
+  .feed-err { color: #ff4444; }
+  .feed-empty { color: var(--muted); text-align: center; padding: 30px; }
+
+  /* Loading spinner */
+  .spinner {
+    display: inline-block;
+    width: 14px; height: 14px;
+    border: 2px solid rgba(0,255,136,0.2);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+    vertical-align: middle;
+    margin-right: 6px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .refresh-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    padding: 6px 14px;
+    border-radius: 6px;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.7rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    margin-left: auto;
+    display: block;
+    margin-bottom: 12px;
+  }
+  .refresh-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+  .api-url {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.7rem;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 12px;
+    color: var(--muted);
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .api-url span { color: var(--accent); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">Order<span>Flow</span></div>
+  <div class="status-bar">
+    <div class="status-pill" id="api-status">
+      <div class="dot"></div>
+      <span>API</span>
+    </div>
+    <div class="status-pill" id="kafka-status">
+      <div class="dot"></div>
+      <span>Kafka</span>
+    </div>
+    <div class="status-pill" id="pg-status">
+      <div class="dot"></div>
+      <span>Postgres</span>
+    </div>
+  </div>
+</header>
+
+<main>
+  <!-- Architecture Diagram -->
+  <div class="arch-section">
+    <div class="section-label">System Architecture</div>
+    <div class="arch-diagram">
+      <div class="flow">
+        <!-- Frontend -->
+        <div class="node accent">
+          <div class="node-icon">🖥️</div>
+          <div class="node-title">Frontend</div>
+          <div class="node-sub">HTTP REST<br>:8080</div>
+        </div>
+
+        <div class="arrow green">
+          <div class="arrow-line"></div>
+          <div class="arrow-label">POST /api/orders</div>
+        </div>
+
+        <!-- Producer -->
+        <div class="node accent">
+          <div class="node-icon">⚡</div>
+          <div class="node-title">Producer API</div>
+          <div class="node-sub">Go HTTP Server<br>port :8080</div>
+          <div class="node-badge badge-write">WRITES</div>
+        </div>
+
+        <!-- Fan out -->
+        <div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0">
+          <div class="arrow green" style="width:50px">
+            <div class="arrow-line"></div>
+            <div class="arrow-label">INSERT</div>
+          </div>
+          <div class="arrow orange" style="width:50px">
+            <div class="arrow-line"></div>
+            <div class="arrow-label">PUT</div>
+          </div>
+          <div class="arrow blue" style="width:50px">
+            <div class="arrow-line"></div>
+            <div class="arrow-label">PUBLISH</div>
+          </div>
+        </div>
+
+        <!-- Storage group -->
+        <div style="display:flex;flex-direction:column;gap:8px;flex:1">
+          <div class="sub-nodes">
+            <div class="sub-node s1">
+              <div class="sub-node-title">🐘 Postgres Shard 1</div>
+              <div class="sub-node-sub">Users A–M · port :5432</div>
+            </div>
+            <div class="sub-node s2">
+              <div class="sub-node-title">🐘 Postgres Shard 2</div>
+              <div class="sub-node-sub">Users N–Z · port :5433</div>
+            </div>
+          </div>
+          <div class="sub-node" style="border-color:rgba(255,107,53,0.3)">
+            <div class="sub-node-title">🪣 S3 (LocalStack)</div>
+            <div class="sub-node-sub">order-receipts · port :4566</div>
+          </div>
+          <div class="sub-node kafka">
+            <div class="sub-node-title">📨 Kafka</div>
+            <div class="sub-node-sub">topic: orders · port :9092</div>
+          </div>
+        </div>
+
+        <div class="arrow orange" style="width:50px">
+          <div class="arrow-line"></div>
+          <div class="arrow-label">CONSUME</div>
+        </div>
+
+        <!-- Consumer -->
+        <div class="node consumer">
+          <div class="node-icon">📬</div>
+          <div class="node-title">Consumer</div>
+          <div class="node-sub">Kafka only<br>No S3/PG</div>
+          <div class="node-badge badge-no">READ-ONLY KAFKA</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Stats -->
+  <div class="stats-row">
+    <div class="stat-card">
+      <div class="stat-value" id="stat-total">0</div>
+      <div class="stat-label">Total Orders</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value" id="stat-shard1">0</div>
+      <div class="stat-label">Shard 1 (A–M)</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value" id="stat-shard2">0</div>
+      <div class="stat-label">Shard 2 (N–Z)</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value" id="stat-revenue">$0</div>
+      <div class="stat-label">Total Revenue</div>
+    </div>
+  </div>
+
+  <!-- Form + Orders -->
+  <div class="grid-2">
+    <!-- Order Form -->
+    <div class="panel">
+      <div class="panel-title">📦 Place Order</div>
+      <div class="panel-desc">Writes to Postgres shard → uploads receipt to S3 → publishes to Kafka</div>
+
+      <div class="api-url">
+        POST <span>http://localhost:8080/api/orders</span>
+      </div>
+
+      <div class="form-group">
+        <label>User ID</label>
+        <input type="text" id="user-id" placeholder="e.g. alice, bob, zara" value="alice">
+        <div class="shard-indicator" id="shard-hint">
+          <span>●</span><span id="shard-hint-text"></span>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Product</label>
+        <select id="product">
+          <option>Mechanical Keyboard</option>
+          <option>Wireless Mouse</option>
+          <option>4K Monitor</option>
+          <option>USB-C Hub</option>
+          <option>Laptop Stand</option>
+          <option>Webcam HD</option>
+          <option>Desk Mat XL</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Quantity</label>
+        <input type="number" id="quantity" value="1" min="1" max="100">
+      </div>
+      <div class="form-group">
+        <label>Unit Price ($)</label>
+        <input type="number" id="price" value="149.99" step="0.01" min="0.01">
+      </div>
+      <button class="submit-btn" id="submit-btn" onclick="placeOrder()">Place Order →</button>
+
+      <div class="response-box" id="response-box"></div>
+    </div>
+
+    <!-- Orders List + Activity -->
+    <div style="display:flex;flex-direction:column;gap:16px">
+      <div class="panel" style="flex:1">
+        <div class="panel-title">📋 Recent Orders
+          <button class="refresh-btn" onclick="loadOrders()">↻ Refresh</button>
+        </div>
+        <div class="orders-table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Order ID</th>
+                <th>User</th>
+                <th>Product</th>
+                <th>Qty</th>
+                <th>Total</th>
+                <th>Shard</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="orders-tbody">
+              <tr><td colspan="7"><div class="empty-state">No orders yet. Place your first order!</div></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">⚡ Pipeline Activity</div>
+        <div class="panel-desc">Live log of producer operations</div>
+        <div class="activity-feed" id="activity-feed">
+          <div class="feed-empty">Waiting for orders...</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script>
+const API = 'http://localhost:8080';
+let orderCount = { total: 0, shard1: 0, shard2: 0, revenue: 0 };
+let activityFeed = [];
+
+// Shard hint
+document.getElementById('user-id').addEventListener('input', function() {
+  const uid = this.value.trim();
+  const hint = document.getElementById('shard-hint');
+  const hintText = document.getElementById('shard-hint-text');
+  if (!uid) { hint.className = 'shard-indicator'; return; }
+  const first = uid[0].toUpperCase();
+  if (first >= 'A' && first <= 'M') {
+    hint.className = 'shard-indicator visible s1';
+    hintText.textContent = `→ Shard 1 (A–M) · port :5432`;
+  } else {
+    hint.className = 'shard-indicator visible s2';
+    hintText.textContent = `→ Shard 2 (N–Z) · port :5433`;
+  }
+});
+// trigger on load
+document.getElementById('user-id').dispatchEvent(new Event('input'));
+
+async function placeOrder() {
+  const btn = document.getElementById('submit-btn');
+  const box = document.getElementById('response-box');
+  const uid = document.getElementById('user-id').value.trim();
+  const product = document.getElementById('product').value;
+  const qty = parseInt(document.getElementById('quantity').value);
+  const price = parseFloat(document.getElementById('price').value);
+
+  if (!uid) { showResponse('error', 'User ID is required'); return; }
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>Processing...';
+  box.className = 'response-box';
+
+  const payload = { user_id: uid, product_name: product, quantity: qty, price: price };
+  addActivity('info', `Sending order for ${uid}: ${qty}x ${product}`);
+
+  try {
+    const res = await fetch(`${API}/api/orders`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+
+    if (!res.ok) {
+      showResponse('error', data.error || 'Request failed');
+      addActivity('error', `Order failed: ${data.error}`);
+    } else {
+      const o = data.order;
+      const total = (o.quantity * o.price).toFixed(2);
+      showResponse('success',
+`✅ ORDER CREATED
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Order ID:  ${o.id}
+User:      ${o.user_id}
+Product:   ${o.product_name}
+Quantity:  ${o.quantity}
+Total:     $${total}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Shard:     ${data.shard_info}
+Receipt:   ${data.receipt || 'n/a'}
+Status:    ${o.status}
+`);
+      addActivity('pg', `✓ Postgres ${data.shard}: order ${o.id.slice(0,8)}... saved`);
+      addActivity('s3', `✓ S3 receipt uploaded: ${data.receipt || 'n/a'}`);
+      addActivity('kafka', `✓ Kafka event published for user ${uid}`);
+      setTimeout(loadOrders, 500);
+    }
+  } catch(e) {
+    showResponse('error', `Connection error: ${e.message}\n\nMake sure the producer is running:\ndocker-compose up`);
+    addActivity('error', `Connection failed: ${e.message}`);
+  }
+
+  btn.disabled = false;
+  btn.innerHTML = 'Place Order →';
+}
+
+function showResponse(type, text) {
+  const box = document.getElementById('response-box');
+  box.className = `response-box visible ${type === 'error' ? 'error' : ''}`;
+  box.textContent = text;
+}
+
+function addActivity(type, msg) {
+  const feed = document.getElementById('activity-feed');
+  const now = new Date().toLocaleTimeString('en-US', { hour12: false });
+
+  const classMap = { kafka: 'feed-kafka', s3: 'feed-s3', pg: 'feed-pg', error: 'feed-err', info: '' };
+  const item = document.createElement('div');
+  item.className = `feed-item ${classMap[type] || ''}`;
+  item.innerHTML = `<span class="feed-time">${now}</span><span>${msg}</span>`;
+
+  if (feed.querySelector('.feed-empty')) feed.innerHTML = '';
+  feed.insertBefore(item, feed.firstChild);
+  if (feed.children.length > 50) feed.removeChild(feed.lastChild);
+}
+
+async function loadOrders() {
+  try {
+    const res = await fetch(`${API}/api/orders`);
+    if (!res.ok) return;
+    const data = await res.json();
+    renderOrders(data.orders || []);
+    updateStats(data.orders || []);
+  } catch(e) { /* silent */ }
+}
+
+function renderOrders(orders) {
+  const tbody = document.getElementById('orders-tbody');
+  if (!orders.length) {
+    tbody.innerHTML = '<tr><td colspan="7"><div class="empty-state">No orders yet. Place your first order!</div></td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = orders.map(o => {
+    const first = o.user_id[0]?.toUpperCase() || 'A';
+    const shardNum = (first >= 'A' && first <= 'M') ? 1 : 2;
+    const total = (o.quantity * o.price).toFixed(2);
+    const shortId = o.id.slice(0, 8) + '...';
+    return `<tr>
+      <td title="${o.id}">${shortId}</td>
+      <td>${o.user_id}</td>
+      <td>${o.product_name}</td>
+      <td>${o.quantity}</td>
+      <td>$${total}</td>
+      <td><span class="tag tag-s${shardNum}">shard${shardNum}</span></td>
+      <td><span class="tag tag-${o.status || 'created'}">${o.status || 'created'}</span></td>
+    </tr>`;
+  }).join('');
+}
+
+function updateStats(orders) {
+  let s1 = 0, s2 = 0, rev = 0;
+  orders.forEach(o => {
+    const first = o.user_id[0]?.toUpperCase() || 'A';
+    if (first >= 'A' && first <= 'M') s1++; else s2++;
+    rev += o.quantity * o.price;
+  });
+  document.getElementById('stat-total').textContent = orders.length;
+  document.getElementById('stat-shard1').textContent = s1;
+  document.getElementById('stat-shard2').textContent = s2;
+  document.getElementById('stat-revenue').textContent = `$${rev.toFixed(0)}`;
+}
+
+async function checkHealth() {
+  try {
+    const res = await fetch(`${API}/health`);
+    const ok = res.ok;
+    const apiEl = document.getElementById('api-status');
+    apiEl.className = `status-pill ${ok ? 'online' : ''}`;
+    if (ok) {
+      document.getElementById('kafka-status').className = 'status-pill online';
+      document.getElementById('pg-status').className = 'status-pill online';
+    }
+  } catch(e) {
+    document.getElementById('api-status').className = 'status-pill';
+    document.getElementById('kafka-status').className = 'status-pill';
+    document.getElementById('pg-status').className = 'status-pill';
+  }
+}
+
+// Init
+checkHealth();
+loadOrders();
+setInterval(loadOrders, 10000);
+setInterval(checkHealth, 5000);
+</script>
+</body>
+</html>

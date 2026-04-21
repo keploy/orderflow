@@ -1,0 +1,34 @@
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+
+# Secrets — never commit
+gh_token.txt
+*.pem
+*.key
+.env
+.env.*
+
+# Logs
+*.log
+log*.txt
+cloud.log
+
+# Archives / binaries
+*.zip
+*.tar
+*.tar.gz
+
+# Temp / generated
+*-tmp.yaml
+*-tmp.yml
+mock.yaml
+12.txt
+
+# Local Keploy runtime artifacts
+keploy/reports/
+keploy/logs/
+
+# Vendored Istio release (download separately)
+orderflow-k8s/istio-*/

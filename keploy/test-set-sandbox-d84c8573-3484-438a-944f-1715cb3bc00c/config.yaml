@@ -1,0 +1,9 @@
+preScript: ""
+postScript: ""
+appCommand: ""
+template: {}
+mockRegistry:
+    mock: 2346a37493b5b1c756f00c26c6a0cf8ce2259d198c18f7cfaeb79ab64b278bf4
+    app: orderflow
+metadata:
+    name: test-set-sandbox-d84c8573-3484-438a-944f-1715cb3bc00c

@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: orderflow-config
+  namespace: orderflow
+data:
+  # Kafka
+  KAFKA_BROKERS: "kafka:29092"
+  KAFKA_TOPIC: "orders"
+  KAFKA_GROUP_ID: "order-consumer-group"
+
+  # Postgres
+  PG_SHARD1_DSN: "postgres://orderuser:orderpass@postgres-shard1:5432/orders_shard1?sslmode=disable"
+  PG_SHARD2_DSN: "postgres://orderuser:orderpass@postgres-shard2:5432/orders_shard2?sslmode=disable"
+
+  # S3 / LocalStack
+  S3_ENDPOINT: "http://localstack:4566"
+  S3_BUCKET: "order-receipts"
+  AWS_REGION: "us-east-1"
+
+  # App
+  PORT: "8080"

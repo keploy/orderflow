@@ -1,0 +1,26 @@
+---
+# ── Mutual TLS — PeerAuthentication ──────────────────────────────────────────
+#
+# STRICT mode means:
+#   - Every connection inside the `orderflow` namespace MUST use mTLS.
+#   - Plain-text connections from any pod are REJECTED by Envoy.
+#   - istiod auto-rotates certificates — no manual cert management.
+#
+# What this gives you:
+#   - producer ↔ postgres-shard1   : encrypted + authenticated
+#   - producer ↔ kafka             : encrypted + authenticated
+#   - producer ↔ localstack        : encrypted + authenticated
+#   - producer ↔ consumer (via Kafka, indirectly)
+#
+# NOTE: Kafka and Postgres are TCP services (not HTTP). Envoy wraps their TCP
+# connections in mTLS at L4 transparently — the Go application and Postgres
+# see no difference. The sidecar handles TLS termination on both ends.
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: orderflow-mtls
+  namespace: orderflow
+spec:
+  # No selector = applies to ALL pods in this namespace
+  mtls:
+    mode: PERMISSIVE

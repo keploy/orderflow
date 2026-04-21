@@ -1,0 +1,139 @@
+---
+# ═══════════════════════════════════════════════════════════════════════════════
+# CIRCUIT BREAKER — DestinationRules
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# HOW A CIRCUIT BREAKER WORKS
+# ───────────────────────────
+#                                ┌──────────────┐
+#                    CLOSED      │   5 errors   │   OPEN
+#                  (normal) ─────► in 30s  ─────►  (fast-fail)
+#                      ▲         └──────────────┘       │
+#                      │                                 │ 30s
+#                      │         ┌──────────────┐        │
+#                      └─────────│  1 success   │◄───────┘
+#                                │ HALF-OPEN    │
+#                                └──────────────┘
+#
+# CLOSED   → Requests flow normally through Envoy to the upstream service.
+# OPEN     → Envoy immediately returns 503 without touching the upstream.
+#            The producer's Go code receives an error and can handle it
+#            gracefully (log, return error to client) instead of blocking.
+# HALF-OPEN→ After the sleep window, one probe request is let through.
+#            If it succeeds, breaker resets to CLOSED. If it fails, back to OPEN.
+#
+# WHY THIS MATTERS FOR ORDERFLOW
+# ───────────────────────────────
+# The producer writes to postgres-shard1 (users A-M) and postgres-shard2 (N-Z).
+# If shard1 becomes slow (e.g. disk pressure), without a circuit breaker:
+#   - Every order for users A-M blocks waiting for a DB response
+#   - Goroutines pile up, memory grows, the producer OOMs and crashes
+#   - ALL orders fail, even for users N-Z whose shard is healthy
+#
+# With this circuit breaker:
+#   - After 5 consecutive failures to shard1, Envoy opens the circuit
+#   - Orders for A-M return an immediate error (producer can queue/retry later)
+#   - Orders for N-Z continue flowing normally via shard2
+#   - The producer never crashes due to shard1's issues
+
+---
+# Circuit breaker for Postgres Shard 1 (users A-M)
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: postgres-shard1-circuit-breaker
+  namespace: orderflow
+spec:
+  host: postgres-shard1.orderflow.svc.cluster.local
+  trafficPolicy:
+    connectionPool:
+      tcp:
+        # Max simultaneous connections to shard1 from any single producer pod.
+        # If producer tries to open a 101st connection, Envoy rejects it immediately
+        # instead of queuing — prevents goroutine pile-up.
+        maxConnections: 100
+        # How long to wait for a TCP connection to be established.
+        # Postgres on a struggling node can hang for minutes without this.
+        connectTimeout: 3s
+    outlierDetection:
+      # ── This is the circuit breaker logic ───────────────────────────────
+      # Envoy tracks consecutive errors per upstream host.
+      # "consecutive5xxErrors" = 5xx HTTP responses OR TCP connection failures.
+      # For Postgres (TCP), a failed connection attempt counts as a 5xx-equivalent.
+      consecutive5xxErrors: 5
+      # How often Envoy scans hosts for ejection eligibility.
+      interval: 10s
+      # How long an ejected host stays out of the load balancing pool.
+      # During this time, all requests to shard1 immediately return 503.
+      baseEjectionTime: 30s
+      # Max % of hosts that can be ejected at once.
+      # At 100%, if shard1 is the only host, it can be fully ejected.
+      maxEjectionPercent: 100
+---
+# Circuit breaker for Postgres Shard 2 (users N-Z) — same config
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: postgres-shard2-circuit-breaker
+  namespace: orderflow
+spec:
+  host: postgres-shard2.orderflow.svc.cluster.local
+  trafficPolicy:
+    connectionPool:
+      tcp:
+        maxConnections: 100
+        connectTimeout: 3s
+    outlierDetection:
+      consecutive5xxErrors: 5
+      interval: 10s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 100
+---
+# Circuit breaker for Kafka
+# Kafka uses long-lived TCP connections so maxConnections is higher.
+# If Kafka broker is unreachable, the breaker prevents the producer
+# from retrying indefinitely and exhausting file descriptors.
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: kafka-circuit-breaker
+  namespace: orderflow
+spec:
+  host: kafka.orderflow.svc.cluster.local
+  trafficPolicy:
+    connectionPool:
+      tcp:
+        maxConnections: 50
+        connectTimeout: 5s
+    outlierDetection:
+      consecutive5xxErrors: 3
+      interval: 15s
+      baseEjectionTime: 60s
+      maxEjectionPercent: 100
+---
+# Circuit breaker for LocalStack S3
+# S3 uploads are synchronous in the producer hot path (receipt upload).
+# If LocalStack is slow, we want to fail fast and not block order creation.
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: localstack-circuit-breaker
+  namespace: orderflow
+spec:
+  host: localstack.orderflow.svc.cluster.local
+  trafficPolicy:
+    connectionPool:
+      http:
+        # Limit pending HTTP requests queued waiting for a connection.
+        # Beyond this, Envoy returns 503 immediately.
+        http1MaxPendingRequests: 50
+        # Max concurrent HTTP requests to LocalStack.
+        http2MaxRequests: 100
+      tcp:
+        maxConnections: 50
+        connectTimeout: 3s
+    outlierDetection:
+      consecutive5xxErrors: 5
+      interval: 10s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 100
