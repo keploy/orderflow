@@ -1,0 +1,97 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: zookeeper
+  namespace: orderflow
+  labels:
+    app: zookeeper
+spec:
+  clusterIP: None   # Headless for StatefulSet DNS
+  selector:
+    app: zookeeper
+  ports:
+    - name: client
+      port: 2181
+      targetPort: 2181
+    - name: peer
+      port: 2888
+      targetPort: 2888
+    - name: leader-election
+      port: 3888
+      targetPort: 3888
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: zookeeper
+  namespace: orderflow
+  labels:
+    app: zookeeper
+spec:
+  serviceName: zookeeper
+  replicas: 1
+  selector:
+    matchLabels:
+      app: zookeeper
+  template:
+    metadata:
+      labels:
+        app: zookeeper
+    spec:
+      # ── Mac ARM64 (Apple Silicon) ──────────────────────────────────────────
+      # confluentinc/cp-zookeeper:7.4.0 ships a native arm64 layer.
+      # The nodeSelector ensures the pod is only scheduled on arm64 nodes
+      # (the single node Minikube creates on Apple Silicon).
+      nodeSelector:
+        kubernetes.io/arch: arm64
+      containers:
+        - name: zookeeper
+          image: confluentinc/cp-zookeeper:7.4.0
+          ports:
+            - containerPort: 2181
+            - containerPort: 2888
+            - containerPort: 3888
+          env:
+            - name: ZOOKEEPER_CLIENT_PORT
+              value: "2181"
+            - name: ZOOKEEPER_TICK_TIME
+              value: "2000"
+            - name: ZOOKEEPER_4LW_COMMANDS_WHITELIST
+              value: "ruok"
+            - name: ZOOKEEPER_DATA_DIR
+              value: /var/lib/zookeeper/data
+            - name: ZOOKEEPER_LOG_DIR
+              value: /var/lib/zookeeper/log
+          volumeMounts:
+            - name: zookeeper-data
+              mountPath: /var/lib/zookeeper
+          # Use exec probe instead of tcpSocket — more reliable on ARM cp-zookeeper.
+          # "ruok" is Zookeeper's built-in 4-letter health command.
+          livenessProbe:
+            tcpSocket:
+             port: 2181
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+           tcpSocket:
+            port: 2181
+           initialDelaySeconds: 30
+           periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+  volumeClaimTemplates:
+    - metadata:
+        name: zookeeper-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 2Gi

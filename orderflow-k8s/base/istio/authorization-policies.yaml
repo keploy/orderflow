@@ -1,0 +1,123 @@
+---
+# ═══════════════════════════════════════════════════════════════════════════════
+# AUTHORIZATION POLICIES
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# These policies are evaluated by the Envoy sidecar on the DESTINATION pod.
+# Even if a NetworkPolicy allows the TCP connection, Istio's AuthorizationPolicy
+# can still reject it based on the mTLS service identity (SPIFFE URI).
+#
+# This is a second, independent enforcement layer on top of NetworkPolicy:
+#   NetworkPolicy  → kernel drops packets (L4, IP-based)
+#   AuthorizationPolicy → Envoy rejects requests (L7, identity-based)
+#
+# Service identities come from istiod-issued X.509 certs:
+#   producer  → spiffe://cluster.local/ns/orderflow/sa/default
+#   consumer  → spiffe://cluster.local/ns/orderflow/sa/default
+# (In production, give each service its own ServiceAccount for more granularity)
+
+---
+# Producer can be called by anyone inside the mesh (the frontend, other services).
+# In a stricter setup you'd list allowed principals explicitly.
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-producer-ingress
+  namespace: orderflow
+spec:
+  selector:
+    matchLabels:
+      app: producer
+  rules:
+    - from:
+        - source:
+            # Allow any principal inside the cluster mesh
+            principals:
+              - "cluster.local/ns/orderflow/sa/default"
+              - "cluster.local/ns/keploy/sa/*"
+      to:
+        - operation:
+            methods: ["GET", "POST", "OPTIONS"]
+            paths: ["/api/*", "/health"]
+    # Allow keploy proxy (no sidecar, no mTLS) — ipBlocks works without mTLS
+    - from:
+        - source:
+            ipBlocks: ["10.244.0.0/16"]
+      to:
+        - operation:
+            methods: ["GET", "POST", "OPTIONS"]
+            paths: ["/api/*", "/health"]
+---
+# Postgres shards can ONLY be called by the producer.
+# The consumer is blocked at both NetworkPolicy (kernel) AND here (Envoy).
+# Two independent layers = defence in depth.
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-postgres-from-producer-only
+  namespace: orderflow
+spec:
+  selector:
+    matchLabels:
+      app: postgres-shard1
+  rules:
+    - from:
+        - source:
+            principals: ["cluster.local/ns/orderflow/sa/default"]
+      to:
+        - operation:
+            # Postgres is TCP, not HTTP — Istio matches on ports for TCP services
+            ports: ["5432"]
+---
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-postgres-shard2-from-producer-only
+  namespace: orderflow
+spec:
+  selector:
+    matchLabels:
+      app: postgres-shard2
+  rules:
+    - from:
+        - source:
+            principals: ["cluster.local/ns/orderflow/sa/default"]
+      to:
+        - operation:
+            ports: ["5432"]
+---
+# LocalStack can ONLY be called by the producer
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-localstack-from-producer-only
+  namespace: orderflow
+spec:
+  selector:
+    matchLabels:
+      app: localstack
+  rules:
+    - from:
+        - source:
+            principals: ["cluster.local/ns/orderflow/sa/default"]
+      to:
+        - operation:
+            ports: ["4566"]
+---
+# Kafka can be called by both producer and consumer
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-kafka-from-producer-and-consumer
+  namespace: orderflow
+spec:
+  selector:
+    matchLabels:
+      app: kafka
+  rules:
+    - from:
+        - source:
+            principals: ["cluster.local/ns/orderflow/sa/default"]
+      to:
+        - operation:
+            ports: ["29092"]

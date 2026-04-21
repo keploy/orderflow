@@ -1,0 +1,18 @@
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-keploy-to-producer
+  namespace: orderflow
+spec:
+  selector:
+    matchLabels:
+      app: producer
+  rules:
+  - from:
+    - source:
+        namespaces: ["keploy"]
+        principals: ["cluster.local/ns/keploy/sa/k8s-proxy"]
+    to:
+    - operation:
+        methods: ["GET", "POST", "OPTIONS"]
+        paths: ["/api/*", "/health"]

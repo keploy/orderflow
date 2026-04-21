@@ -1,0 +1,120 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-shard1
+  namespace: orderflow
+  labels:
+    app: postgres-shard1
+    shard: "1"
+spec:
+  clusterIP: None
+  selector:
+    app: postgres-shard1
+  ports:
+    - port: 5432
+      targetPort: 5432
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-shard1-init
+  namespace: orderflow
+data:
+  init.sql: |
+    CREATE TABLE IF NOT EXISTS orders (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id VARCHAR(100) NOT NULL,
+        product_name VARCHAR(255) NOT NULL,
+        quantity INT NOT NULL,
+        price DECIMAL(10,2) NOT NULL,
+        status VARCHAR(50) DEFAULT 'pending',
+        receipt_s3_key VARCHAR(512),
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_orders_user_id ON orders(user_id);
+    CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
+    CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at);
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres-shard1
+  namespace: orderflow
+  labels:
+    app: postgres-shard1
+    shard: "1"
+spec:
+  serviceName: postgres-shard1
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres-shard1
+  template:
+    metadata:
+      labels:
+        app: postgres-shard1
+        shard: "1"
+    spec:
+      # ── Mac ARM64 (Apple Silicon) ──────────────────────────────────────────
+      # postgres:15-alpine ships a native linux/arm64 layer — no emulation needed.
+      nodeSelector:
+        kubernetes.io/arch: arm64
+      containers:
+        - name: postgres
+          image: postgres:15-alpine
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: orderflow-secrets
+                  key: POSTGRES_DB_SHARD1
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: orderflow-secrets
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: orderflow-secrets
+                  key: POSTGRES_PASSWORD
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: postgres-shard1-data
+              mountPath: /var/lib/postgresql/data
+            - name: init-scripts
+              mountPath: /docker-entrypoint-initdb.d
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "orderuser", "-d", "orders_shard1"]
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "orderuser", "-d", "orders_shard1"]
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: init-scripts
+          configMap:
+            name: postgres-shard1-init
+  volumeClaimTemplates:
+    - metadata:
+        name: postgres-shard1-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 5Gi

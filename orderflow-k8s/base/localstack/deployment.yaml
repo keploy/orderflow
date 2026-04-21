@@ -1,0 +1,93 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: localstack
+  namespace: orderflow
+  labels:
+    app: localstack
+spec:
+  selector:
+    app: localstack
+  ports:
+    - name: gateway
+      port: 4566
+      targetPort: 4566
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: localstack-init
+  namespace: orderflow
+data:
+  init.sh: |
+    #!/bin/bash
+    echo "Initializing LocalStack S3..."
+    awslocal s3 mb s3://order-receipts
+    awslocal s3api put-bucket-acl --bucket order-receipts --acl public-read
+    echo "S3 bucket 'order-receipts' created successfully"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: localstack
+  namespace: orderflow
+  labels:
+    app: localstack
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: localstack
+  template:
+    metadata:
+      labels:
+        app: localstack
+    spec:
+      # ── Mac ARM64 (Apple Silicon) ──────────────────────────────────────────
+      # localstack/localstack:3.0 ships a native linux/arm64 layer.
+      nodeSelector:
+        kubernetes.io/arch: arm64
+      containers:
+        - name: localstack
+          image: localstack/localstack:3.0
+          ports:
+            - containerPort: 4566
+          env:
+            - name: SERVICES
+              value: "s3"
+            - name: DEFAULT_REGION
+              value: "us-east-1"
+            - name: AWS_DEFAULT_REGION
+              value: "us-east-1"
+          volumeMounts:
+            - name: localstack-init
+              mountPath: /etc/localstack/init/ready.d
+            - name: localstack-data
+              mountPath: /var/lib/localstack
+          readinessProbe:
+            httpGet:
+              path: /_localstack/health
+              port: 4566
+            initialDelaySeconds: 15
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /_localstack/health
+              port: 4566
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: localstack-init
+          configMap:
+            name: localstack-init
+            defaultMode: 0755
+        - name: localstack-data
+          emptyDir: {}

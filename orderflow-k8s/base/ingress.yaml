@@ -1,0 +1,35 @@
+---
+# Requires an ingress controller (nginx recommended).
+# Install with: kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.9.4/deploy/static/provider/cloud/deploy.yaml
+# For Minikube: minikube addons enable ingress
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: orderflow-ingress
+  namespace: orderflow
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/cors-allow-origin: "*"
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+    nginx.ingress.kubernetes.io/cors-allow-methods: "GET, POST, OPTIONS"
+    nginx.ingress.kubernetes.io/cors-allow-headers: "Content-Type"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: orderflow.local   # Add to /etc/hosts: 127.0.0.1 orderflow.local
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: producer
+                port:
+                  number: 8080
+          - path: /health
+            pathType: Prefix
+            backend:
+              service:
+                name: producer
+                port:
+                  number: 8080

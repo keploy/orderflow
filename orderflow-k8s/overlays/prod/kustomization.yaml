@@ -1,0 +1,84 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: orderflow
+
+resources:
+  - ../../base
+
+# Prod patches: increase resources + switch to Always pull for registry images
+patches:
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: producer
+        namespace: orderflow
+      spec:
+        replicas: 1
+        template:
+          spec:
+            containers:
+              - name: producer
+                # In prod images come from a registry, not minikube image load
+                imagePullPolicy: Always
+                resources:
+                  requests:
+                    cpu: 250m
+                    memory: 256Mi
+                  limits:
+                    cpu: 1000m
+                    memory: 512Mi
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: consumer
+        namespace: orderflow
+      spec:
+        replicas: 1
+        template:
+          spec:
+            containers:
+              - name: consumer
+                imagePullPolicy: Always
+                resources:
+                  requests:
+                    cpu: 100m
+                    memory: 128Mi
+                  limits:
+                    cpu: 500m
+                    memory: 256Mi
+  - patch: |-
+      apiVersion: apps/v1
+      kind: StatefulSet
+      metadata:
+        name: kafka
+        namespace: orderflow
+      spec:
+        template:
+          spec:
+            containers:
+              - name: kafka
+                resources:
+                  requests:
+                    cpu: 500m
+                    memory: 1Gi
+                  limits:
+                    cpu: 2000m
+                    memory: 2Gi
+
+# Point to your real arm64 registry images in prod.
+# Build and push with:
+#   docker build --platform linux/arm64 -t your-registry.io/orderflow/producer:1.0.0 ../producer
+#   docker push your-registry.io/orderflow/producer:1.0.0
+images:
+  - name: orderflow-producer
+    newName: your-registry.io/orderflow/producer   # CHANGE THIS
+    newTag: "1.0.0"
+  - name: orderflow-consumer
+    newName: your-registry.io/orderflow/consumer   # CHANGE THIS
+    newTag: "1.0.0"
+
+commonLabels:
+  environment: prod
