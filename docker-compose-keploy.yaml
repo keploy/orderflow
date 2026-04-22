@@ -9,15 +9,16 @@ services:
             AWS_ACCESS_KEY_ID: test
             AWS_REGION: us-east-1
             AWS_SECRET_ACCESS_KEY: test
-            KAFKA_BROKERS: kafka:29092
+            KAFKA_BROKERS: orderflow-kafka:29092
             KAFKA_GROUP_ID: order-consumer-group
             KAFKA_TOPIC: orders
-            PG_SHARD1_DSN: postgres://orderuser:orderpass@postgres-shard1:5432/orders_shard1?sslmode=disable
-            PG_SHARD2_DSN: postgres://orderuser:orderpass@postgres-shard2:5432/orders_shard2?sslmode=disable
+            PG_SHARD1_DSN: postgres://orderuser:orderpass@orderflow-postgres-shard1:5432/orders_shard1?sslmode=disable
+            PG_SHARD2_DSN: postgres://orderuser:orderpass@orderflow-postgres-shard2:5432/orders_shard2?sslmode=disable
             PORT: "8080"
             S3_BUCKET: order-receipts
-            S3_ENDPOINT: http://localstack:4566
+            S3_ENDPOINT: http://orderflow-localstack:4566
         restart: unless-stopped
 networks:
     default:
-        driver: bridge
+        external: true
+        name: orderflow_default
