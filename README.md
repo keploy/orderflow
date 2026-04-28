@@ -1,6 +1,6 @@
 # OrderFlow — Real-time Order Processing Pipeline
 
-A production-grade Go application demonstrating a real-time e-commerce order processing system with:
+A production-grade Go application demonstrating a real-time e-commerce order processing system wit:
 
 - **Producer API** → writes to sharded Postgres + S3 + publishes to Kafka
 - **Consumer Service** → reads from Kafka only (no S3/Postgres access by design)
