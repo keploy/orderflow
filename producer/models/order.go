@@ -1,6 +1,13 @@
 package models
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
+
+// fixedNanoLayout always emits 9 fractional-second digits so the JSON byte
+// width of timestamps is constant across runs.
+const fixedNanoLayout = "2006-01-02T15:04:05.000000000Z"
 
 type Order struct {
 	ID          string    `json:"id"`
@@ -12,6 +19,19 @@ type Order struct {
 	ReceiptKey  string    `json:"receipt_s3_key,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+func (o Order) MarshalJSON() ([]byte, error) {
+	type alias Order
+	return json.Marshal(&struct {
+		alias
+		CreatedAt string `json:"created_at"`
+		UpdatedAt string `json:"updated_at"`
+	}{
+		alias:     alias(o),
+		CreatedAt: o.CreatedAt.UTC().Format(fixedNanoLayout),
+		UpdatedAt: o.UpdatedAt.UTC().Format(fixedNanoLayout),
+	})
 }
 
 type CreateOrderRequest struct {
