@@ -15,7 +15,6 @@ func main() {
 
 	cfg := config.Load()
 	log.Println("Starting OrderFlow Producer API...")
-
 	// Retry DB connections (services may start slow)
 	var db *storage.ShardedDB
 	var err error
