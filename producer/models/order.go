@@ -16,7 +16,7 @@ type Order struct {
 	Quantity    int       `json:"quantity"`
 	Price       float64   `json:"price"`
 	Status      string    `json:"status"`
-	ReceiptKey  string    `json:"receipt_s3_ke,omitempty"`
+	ReceiptKey  string    `json:"receipt_s3_key,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }
