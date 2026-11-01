@@ -23,8 +23,7 @@ jobs:
 
       - name: Install keploy enterprise
         run: |
-          curl --silent -O -L https://keploy.io/ent/install.sh
-          sudo bash install.sh
+          keploy_rc=0; keploy_sh="$(mktemp)" && curl -fsSL https://keploy.io/ent/install.sh -o "$keploy_sh" && sudo bash "$keploy_sh" || keploy_rc=$?; rm -f "$keploy_sh"; [ "$keploy_rc" -eq 0 ]
           keploy --version
 
       - name: Bring up app dependencies
