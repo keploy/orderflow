@@ -45,12 +45,13 @@ spec:
         app: localstack
     spec:
       # ── Mac ARM64 (Apple Silicon) ──────────────────────────────────────────
-      # localstack/localstack:3.0 ships a native linux/arm64 layer.
+      # localstack/localstack:4.14.0 ships a native linux/arm64 layer. It is
+      # the compose file's LocalStack (see the reason there).
       nodeSelector:
         kubernetes.io/arch: arm64
       containers:
         - name: localstack
-          image: localstack/localstack:3.0
+          image: localstack/localstack:4.14.0
           ports:
             - containerPort: 4566
           env:
@@ -61,8 +62,13 @@ spec:
             - name: AWS_DEFAULT_REGION
               value: "us-east-1"
           volumeMounts:
+            # The hook alone (subPath), not the whole ConfigMap volume:
+            # LocalStack 4.x runs every script under ready.d, its
+            # subdirectories too, so it would also run the copy in the
+            # volume's hidden timestamped directory, and run the hook twice.
             - name: localstack-init
-              mountPath: /etc/localstack/init/ready.d
+              mountPath: /etc/localstack/init/ready.d/init.sh
+              subPath: init.sh
             - name: localstack-data
               mountPath: /var/lib/localstack
           readinessProbe:

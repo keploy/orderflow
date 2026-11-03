@@ -78,7 +78,13 @@ services:
 
   # LocalStack for S3 emulation
   localstack:
-    image: localstack/localstack:3.0
+    # 4.14.0, not 3.0: 3.0 is 3.0.2 on Debian 12 (glibc 2.36), whose setenv
+    # frees the environ array it outgrows while another thread's getenv may
+    # still read it. LocalStack adds its AWS credentials to the environment
+    # at startup while its analytics thread is in getaddrinfo, and about one
+    # start in 2000 dies of SIGSEGV (exit 245). 4.14.0 is Debian 13 (glibc
+    # 2.41, which keeps the old array) and starts without an auth token.
+    image: localstack/localstack:4.14.0
     container_name: orderflow-localstack
     ports:
       - "4566:4566"
