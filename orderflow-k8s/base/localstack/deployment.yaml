@@ -62,8 +62,13 @@ spec:
             - name: AWS_DEFAULT_REGION
               value: "us-east-1"
           volumeMounts:
+            # The hook alone (subPath), not the whole ConfigMap volume:
+            # LocalStack 4.x runs every script under ready.d, its
+            # subdirectories too, so it would also run the copy in the
+            # volume's hidden timestamped directory, and run the hook twice.
             - name: localstack-init
-              mountPath: /etc/localstack/init/ready.d
+              mountPath: /etc/localstack/init/ready.d/init.sh
+              subPath: init.sh
             - name: localstack-data
               mountPath: /var/lib/localstack
           readinessProbe:
