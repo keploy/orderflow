@@ -45,12 +45,13 @@ spec:
         app: localstack
     spec:
       # ── Mac ARM64 (Apple Silicon) ──────────────────────────────────────────
-      # localstack/localstack:3.0 ships a native linux/arm64 layer.
+      # localstack/localstack:4.14.0 ships a native linux/arm64 layer. It is
+      # the compose file's LocalStack (see the reason there).
       nodeSelector:
         kubernetes.io/arch: arm64
       containers:
         - name: localstack
-          image: localstack/localstack:3.0
+          image: localstack/localstack:4.14.0
           ports:
             - containerPort: 4566
           env:
