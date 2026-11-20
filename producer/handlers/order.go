@@ -94,7 +94,7 @@ func (h *OrderHandler) CreateOrder(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Kafka event published for order %s", order.ID)
 	}
 
-	order.Status = "created"
+	order.Status = "order created"
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]interface{}{
