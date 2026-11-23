@@ -32,8 +32,39 @@ services:
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    # Probe Kafka with a direct wire-protocol ApiVersions v0 request via the
+    # image's stdlib python3 instead of kafka-broker-api-versions, which boots
+    # a fresh JVM per check and exceeds its 10 s timeout on CPU-loaded runners
+    # even after "[KafkaServer id=1] started".
     healthcheck:
-      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      test:
+        - CMD
+        - python3
+        - -c
+        - |
+          import os, socket, struct, sys
+          host = os.environ.get("KAFKA_PROBE_HOST", "127.0.0.1")
+          port = int(os.environ.get("KAFKA_PROBE_PORT", "9092"))
+          cid = 0x4b504c59
+          req = struct.pack(">ihhih", 10, 18, 0, cid, -1)
+          def rx(sock, n):
+              buf = bytearray()
+              while len(buf) < n:
+                  chunk = sock.recv(n - len(buf))
+                  if not chunk:
+                      raise EOFError("short read")
+                  buf.extend(chunk)
+              return bytes(buf)
+          with socket.create_connection((host, port), timeout=5) as s:
+              s.settimeout(5)
+              s.sendall(req)
+              size = struct.unpack(">i", rx(s, 4))[0]
+              if size < 10 or size > 65536:
+                  sys.exit(1)
+              body = rx(s, size)
+              rcid, err, cnt = struct.unpack(">ihi", body[:10])
+              if rcid != cid or err != 0 or cnt <= 0 or size != 10 + 6 * cnt:
+                  sys.exit(1)
       interval: 15s
       timeout: 10s
       retries: 10
