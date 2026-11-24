@@ -7,13 +7,46 @@ services:
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
+      KAFKA_HEAP_OPTS: "-Xms128m -Xmx256m"
     ports:
       - "2181:2181"
+    # Probe ZooKeeper via its 4-letter `srvr` wire protocol (enabled by default
+    # in confluentinc/cp-zookeeper:7.4.0) over 127.0.0.1 using stdlib python3,
+    # matching kafka's non-JVM probe below. A 30s start_period and 15 retries
+    # keep JVM + cub/dub bootstrap on CPU-loaded CI runners from tripping
+    # unhealthy at 50s while confirming ZooKeeper is actually serving requests.
     healthcheck:
-      test: ["CMD", "nc", "-z", "localhost", "2181"]
+      test:
+        - CMD
+        - python3
+        - -c
+        - |
+          import os, socket, sys
+          host = os.environ.get("ZOOKEEPER_PROBE_HOST", "127.0.0.1")
+          port = int(os.environ.get("ZOOKEEPER_PROBE_PORT", "2181"))
+          with socket.create_connection((host, port), timeout=5) as s:
+              s.settimeout(5)
+              s.sendall(b"srvr")
+              chunks = []
+              total = 0
+              while total < 4096:
+                  part = s.recv(1024)
+                  if not part:
+                      break
+                  chunks.append(part)
+                  total += len(part)
+              reply = b"".join(chunks)
+              modes = {b"standalone", b"leader", b"follower"}
+              ok = any(
+                  line.startswith(b"Mode: ") and line[6:].strip() in modes
+                  for line in reply.splitlines()
+              )
+              if not ok:
+                  sys.exit(1)
+      start_period: 30s
       interval: 10s
-      timeout: 5s
-      retries: 5
+      timeout: 10s
+      retries: 15
 
   kafka:
     image: confluentinc/cp-kafka:7.4.0
@@ -32,8 +65,39 @@ services:
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    # Probe Kafka with a direct wire-protocol ApiVersions v0 request via the
+    # image's stdlib python3 instead of kafka-broker-api-versions, which boots
+    # a fresh JVM per check and exceeds its 10 s timeout on CPU-loaded runners
+    # even after "[KafkaServer id=1] started".
     healthcheck:
-      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      test:
+        - CMD
+        - python3
+        - -c
+        - |
+          import os, socket, struct, sys
+          host = os.environ.get("KAFKA_PROBE_HOST", "127.0.0.1")
+          port = int(os.environ.get("KAFKA_PROBE_PORT", "9092"))
+          cid = 0x4b504c59
+          req = struct.pack(">ihhih", 10, 18, 0, cid, -1)
+          def rx(sock, n):
+              buf = bytearray()
+              while len(buf) < n:
+                  chunk = sock.recv(n - len(buf))
+                  if not chunk:
+                      raise EOFError("short read")
+                  buf.extend(chunk)
+              return bytes(buf)
+          with socket.create_connection((host, port), timeout=5) as s:
+              s.settimeout(5)
+              s.sendall(req)
+              size = struct.unpack(">i", rx(s, 4))[0]
+              if size < 10 or size > 65536:
+                  sys.exit(1)
+              body = rx(s, size)
+              rcid, err, cnt = struct.unpack(">ihi", body[:10])
+              if rcid != cid or err != 0 or cnt <= 0 or size != 10 + 6 * cnt:
+                  sys.exit(1)
       interval: 15s
       timeout: 10s
       retries: 10
@@ -78,7 +142,13 @@ services:
 
   # LocalStack for S3 emulation
   localstack:
-    image: localstack/localstack:3.0
+    # 4.14.0, not 3.0: 3.0 is 3.0.2 on Debian 12 (glibc 2.36), whose setenv
+    # frees the environ array it outgrows while another thread's getenv may
+    # still read it. LocalStack adds its AWS credentials to the environment
+    # at startup while its analytics thread is in getaddrinfo, and about one
+    # start in 2000 dies of SIGSEGV (exit 245). 4.14.0 is Debian 13 (glibc
+    # 2.41, which keeps the old array) and starts without an auth token.
+    image: localstack/localstack:4.14.0
     container_name: orderflow-localstack
     ports:
       - "4566:4566"
